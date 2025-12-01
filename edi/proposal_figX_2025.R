@@ -35,6 +35,8 @@ get_dfs <- function(datapath, filterstring){
       decimal_yrs_diff = c(decimal_yrs[1]-2016, diff(decimal_yrs)),
       ccost = decimal_yrs * 1e+06, # Cumulative dollars spent (1M/year)
       mcost = decimal_yrs_diff * 1e+06, # Monthly cost
+      # $160 per pub based on optimistic accounting (1M/5000pubs*yr-1)*.8 of cost is human
+      npubcost = npubs * 160,
       ccostperbyte = ccost/cbytes,
       costperbyte = mcost/bytes)
   
@@ -81,24 +83,31 @@ dfa_edi <- dfs_edi[[1]]
 dfm_edi <- dfs_edi[[2]]
 
 # Now reduce the dataset to 2022 forward (period of active grant)
-dfm_edi_sub <- dfm_edi %>% filter(datetime > "2021-12-31 24:00") |>
+dfm_edi_sub <- dfm_edi %>% filter(datetime > "2021-12-31 24:00")
 
 require(zoo)
-coeff = 50
+coeff = 150
 # Plot number of monthly uploads
 pubsfig <- ggplot(data = dfm_edi_sub, aes(x=datetime, y=npubs)) +
   geom_line(aes(y = rollmean(
     npubs, 3, na.pad = TRUE, align = "right"))) + 
-  geom_smooth(method='lm') +
-  # $80 per pub based on optimistic accounting (1M/5000pubs*yr-1)*.8 of cost is human * 0.5hr/pub
-  # geom_line(aes(x=datetime, y=(npubs*80)/coeff)) + 
+  geom_smooth(method='lm', linewidth=0.5) +
+  #geom_line(aes(x=datetime, y=npubcost/160)) +
+  #geom_smooth(aes(x=datetime, y=npubcost/160), method=lm, linewidth=0.5, color='dark green') +
+  ylab('Monthly publications') + xlab('')# +
+  # Monthly cost of pubs
+  #geom_line(aes(x=datetime, y=npubcost/coeff)) + 
   # scale_y_continuous(
   #   # Features of the first axis
   #   name = "Monthly publications",
   #   # Add a second axis and specify its features
-  #   sec.axis = sec_axis(~.*coeff, name="Monthly curation costs")) +
-  # geom_smooth(method = "lm", se = F, formula = y ~ splines::bs(., 2, knots=c('2025-12-31'))) +
-  ylab('Monthly publications') + xlab('')
+  #   sec.axis = sec_axis(~.*coeff, name="Monthly curation costs")) + 
+  # xlab('')# +
+  #geom_smooth(aes(x=datetime, y=npubcost/coeff), method = lm, formula = y ~ splines::ns(x, 3), se = FALSE)
+  #geom_smooth(aes(x=datetime, y=npubcost/coeff), method = lm, formula = y ~ log(x), se = FALSE)
+  # geom_smooth(aes(x=datetime, y=npubcost/coeff), method = lm, formula = y ~ 5000 + 8000*(1-exp(-exp(0.5) * x)), se = FALSE)
+  # geom_smooth(aes(x=datetime, y=npubcost/coeff), method="nls", formula=y~SSasympOff(datetime, A, lrc, c0), color="blue", fullrange=T)
+  
 
 pubsfig
 
@@ -113,14 +122,25 @@ predictfor <- function(model, data, years){
 
 mnpubs <- lm(npubs ~ datetime, data=dfm_edi_sub)
 pred_npub <- predictfor(mnpubs, dfm_edi_sub, 4)
-pubsfig <- pubsfig + geom_line(data=pred_npub, aes(x=datetime, y=y), lty=2, color='blue') +
+pubsfig <- pubsfig + geom_line(data=pred_npub, aes(x=datetime, y=y), lty=2, color='blue', linewidth=0.5) +
   theme_bw() + theme(axis.text = element_text(size = 12), axis.title=element_text(size=14),
                      axis.text.x=element_blank()) +
-  geom_hline(yintercept=80, lty=3, color='dark green') + #geom_hline(yintercept=75, lty=3, color='red') +
+  geom_hline(yintercept=20, lty=3, color='dark green') +
+  annotate("text", label = "$3,200/mo",
+    x = as.POSIXct("2029-04-01 00:00"), y = 23, size = 3, colour = "dark green") +
+  geom_hline(yintercept=40, lty=3, color='dark green') +
+  annotate("text", label = "$6,400/mo",
+    x = as.POSIXct("2029-04-01 00:00"), y = 43, size = 3, colour = "dark green") +
+  geom_hline(yintercept=60, lty=3, color='dark green') +
+  annotate("text", label = "$9,600/mo",
+    x = as.POSIXct("2029-04-01 00:00"), y = 63, size = 3, colour = "dark green") +
+  geom_hline(yintercept=80, lty=3, color='dark green') +
   annotate("text", label = "Cost model 1",
-    x = as.POSIXct("2023-02-01 00:00"), y = 75, size = 3.5, colour = "dark green") +
+    x = as.POSIXct("2023-02-01 00:00"), y = 77, size = 3.5, colour = "black") +
+  annotate("text", label = "$12,800/mo",
+    x = as.POSIXct("2029-04-01 00:00"), y = 83, size = 3, colour = "dark green") +
   annotate("text", label = "Cost model 2",
-    x = as.POSIXct("2023-02-01 00:00"), y = 85, size = 3.5, colour = "red")
+    x = as.POSIXct("2023-02-01 00:00"), y = 83, size = 3.5, colour = "red")
 
 pubsfig
 ggsave('~/GD_gmaurer@nmsu/_current/_proposals_and_reports/EDI_2025_PAPPG/pubsfig.png', pubsfig,
@@ -143,27 +163,38 @@ ggplot(data = dfm_sub[1:(nrow(dfm_sub)-1),], aes(x=datetime, y=costperbyte)) +
   ylab('Monthly avg. cost per MB') + xlab('')
 
 # Plot cumulative mb over time. Adding commitments from CAP and JRN of 15TB
-cbytesfig <- ggplot(data = dfm_sub, aes(x=datetime, y=cbytes/1000 + 15000)) +
-  geom_line() + geom_smooth(method='lm') +
-  ylab('Cumulative GB') + xlab('')
+cbytesfig <- ggplot(data = dfm_sub, aes(x=datetime, y=cbytes/1000000 + 15)) +
+  geom_line() + geom_smooth(method='lm', linewidth=0.5) +
+  ylab('Cumulative TB') + xlab('')
 
-mgb <- lm(cbytes/1000 + 15000 ~ datetime, data=dfm_sub) # Add CAP/JRN committments here too
+mgb <- lm(cbytes/1000000 + 15 ~ datetime, data=dfm_sub) # Add CAP/JRN committments here too
 # Prediction for next four years
 pred_gb <- predictfor(mgb, dfm_sub, 4)
 # Predicted with additional storage budget of 2TB/year
-pred_gb['y2'] = c(pred_gb$y[1], pred_gb$y[2]+8000)
+pred_gb['y2'] = c(pred_gb$y[1], pred_gb$y[2]+8)
 cbytesfig <- cbytesfig + geom_line(data=pred_gb, aes(x=datetime, y=y), lty=2, colour='blue') +
-  geom_line(data=pred_gb, aes(x=datetime, y=y2), lty=2, colour='black') +
+  geom_line(data=pred_gb, aes(x=datetime, y=y2), lty=2, colour='dark green', linewidth=1) +
   theme_bw() + theme(axis.text = element_text(size = 12), axis.title=element_text(size=14)) +
-  geom_hline(yintercept=45000, lty=3, color='dark green') + #geom_hline(yintercept=3000, lty=3, color='red') +
+  geom_hline(yintercept=30, lty=3, color='dark green') +
+  annotate("text", label = "$690/mo",
+    x = as.POSIXct("2029-04-01 00:00"), y = 31, size = 3, colour = "dark green") +
+  geom_hline(yintercept=35, lty=3, color='dark green')  +
+  annotate("text", label = "$805/mo",
+    x = as.POSIXct("2029-04-01 00:00"), y = 36, size = 3, colour = "dark green") +
+  geom_hline(yintercept=40, lty=3, color='dark green')  +
+  annotate("text", label = "$920/mo",
+    x = as.POSIXct("2029-04-01 00:00"), y = 41, size = 3, colour = "dark green") +
+  geom_hline(yintercept=45, lty=3, color='dark green') + #geom_hline(yintercept=3000, lty=3, color='red') +
   annotate("text", label = "Cost model 1",
-    x = as.POSIXct("2023-02-01 00:00"), y = 44000, size = 3.5, colour = "dark green") +
+    x = as.POSIXct("2023-02-01 00:00"), y = 44, size = 3.5, colour = "black") +
+  annotate("text", label = "$1,035/mo",
+    x = as.POSIXct("2029-04-01 00:00"), y = 46, size = 3, colour = "dark green") +
   annotate("text", label = "Cost model 2",
-    x = as.POSIXct("2023-02-01 00:00"), y = 46000, size = 3.5, colour = "red")
+    x = as.POSIXct("2023-02-01 00:00"), y = 46, size = 3.5, colour = "red")
 
 cbytesfig
 library(patchwork)
-combfig <- pubsfig / cbytesfig
+combfig <- pubsfig / cbytesfig  + plot_layout(axes = "collect")
 combfig
 
 ggsave('~/GD_gmaurer@nmsu/_current/_proposals_and_reports/EDI_2025_PAPPG/costfig.png', combfig,
