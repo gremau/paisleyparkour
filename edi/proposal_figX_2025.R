@@ -86,7 +86,7 @@ dfm_edi <- dfs_edi[[2]]
 dfm_edi_sub <- dfm_edi %>% filter(datetime > "2021-12-31 24:00")
 
 require(zoo)
-coeff = 150
+#coeff = 150
 # Plot number of monthly uploads
 pubsfig <- ggplot(data = dfm_edi_sub, aes(x=datetime, y=npubs)) +
   geom_line(aes(y = rollmean(
@@ -114,30 +114,57 @@ pubsfig
 
 # Function to extend a regression line by n years
 predictfor <- function(model, data, years){
-  pred_x <- c(max(data$datetime),max(data$datetime)+(years*3.15576e+07))
+  pred_x <- seq(max(dfm_edi_sub$datetime),
+                max(dfm_edi_sub$datetime) + (years*3.15576e+07), by = "month")
   pred_lines <- data.frame(datetime=pred_x,
-    y=predict(model, data.frame(datetime=pred_x)))
+    npubs=predict(model, data.frame(datetime=pred_x)))
   return(pred_lines)
 }
 
+# Fit a linear model to npubs
 mnpubs <- lm(npubs ~ datetime, data=dfm_edi_sub)
-pred_npub <- predictfor(mnpubs, dfm_edi_sub, 4)
-pubsfig <- pubsfig + geom_line(data=pred_npub, aes(x=datetime, y=y), lty=2, color='blue', linewidth=0.5) +
-  theme_bw() + theme(axis.text = element_text(size = 12), axis.title=element_text(size=14),
-                     axis.text.x=element_blank()) +
+pred_npub <- predictfor(mnpubs, dfm_edi_sub, 3)
+
+# Now add Pauls cost model to pred_npub
+pred_npub['t'] <- 1:nrow(pred_npub)
+baseCost = 500000 / 12 # $/mo, monthly base cost to keep EDI alive
+# notCurated packages
+C0 = 10 # current cost per non-curated publication
+Cf = 10 # target cost per non-curated publication
+# C1, Model for costs per non-curated publication
+C1 <- C0*(Cf/C0)^(pred_npub$t/length(pred_npub$t)) # cost per publication at time T
+notCuratedPackages <- 200 + pred_npub$t*5
+# Curated packages
+C0 = 50 # current cost per curated publication (200)
+Cf = 25 # target cost per curated publication (100)
+# C2, Model for costs per curated publication
+C2 = C0*(Cf/C0)^(pred_npub$t/length(pred_npub$t)) # cost per publication at time T
+CuratedPackages = 51 + pred_npub$t*2 # This is superseded by the npubs number (linear model)
+
+pred_npub['TotalMonthlyCosts'] <- baseCost + C1 * notCuratedPackages + C2 * CuratedPackages
+pred_npub['marginalGrowthCosts'] <- pred_npub$TotalMonthlyCosts - baseCost
+pred_npub['CostsPerPub'] <- pred_npub$marginalGrowthCosts / (notCuratedPackages + CuratedPackages)
+
+pubsfig <- pubsfig + geom_line(data=pred_npub, aes(x=datetime, y=npubs),
+                               lty=2, color='blue', linewidth=0.5) +
+  geom_line(data=pred_npub, aes(x=datetime, y=marginalGrowthCosts/89),
+                               lty=2, color='dark green', linewidth=1) +
+  theme_bw() + 
+  theme(axis.text=element_text(size=12), axis.title=element_text(size=14),
+        axis.text.x=element_blank()) +
   geom_hline(yintercept=20, lty=3, color='dark green') +
-  annotate("text", label = "$3,200/mo",
+  annotate("text", label = "$3.2K",
     x = as.POSIXct("2029-04-01 00:00"), y = 23, size = 3, colour = "dark green") +
   geom_hline(yintercept=40, lty=3, color='dark green') +
-  annotate("text", label = "$6,400/mo",
+  annotate("text", label = "$6.4K",
     x = as.POSIXct("2029-04-01 00:00"), y = 43, size = 3, colour = "dark green") +
   geom_hline(yintercept=60, lty=3, color='dark green') +
-  annotate("text", label = "$9,600/mo",
+  annotate("text", label = "$9.6K",
     x = as.POSIXct("2029-04-01 00:00"), y = 63, size = 3, colour = "dark green") +
   geom_hline(yintercept=80, lty=3, color='dark green') +
   annotate("text", label = "Cost model 1",
     x = as.POSIXct("2023-02-01 00:00"), y = 77, size = 3.5, colour = "black") +
-  annotate("text", label = "$12,800/mo",
+  annotate("text", label = "$12.8K",
     x = as.POSIXct("2029-04-01 00:00"), y = 83, size = 3, colour = "dark green") +
   annotate("text", label = "Cost model 2",
     x = as.POSIXct("2023-02-01 00:00"), y = 83, size = 3.5, colour = "red")
@@ -193,6 +220,8 @@ cbytesfig <- cbytesfig + geom_line(data=pred_gb, aes(x=datetime, y=y), lty=2, co
     x = as.POSIXct("2023-02-01 00:00"), y = 46, size = 3.5, colour = "red")
 
 cbytesfig
+
+# Join figures together with patchwork
 library(patchwork)
 combfig <- pubsfig / cbytesfig  + plot_layout(axes = "collect")
 combfig
